@@ -1,0 +1,399 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  OWNER
+  ADMIN
+  INVENTORY_MANAGER
+  PROCUREMENT_MANAGER
+  EMPLOYEE
+  VIEWER
+}
+
+enum OrganizationStatus {
+  ACTIVE
+  SUSPENDED
+}
+
+enum LocationType {
+  WAREHOUSE
+  BRANCH
+  STORE
+  DISTRIBUTION_CENTER
+}
+
+enum MovementType {
+  PURCHASE
+  SALE
+  INTERNAL_TRANSFER
+  B2B_OUT
+  B2B_IN
+  ADJUSTMENT
+  RETURN
+  RESERVATION
+  RESERVATION_RELEASE
+}
+
+enum ListingStatus {
+  DRAFT
+  ACTIVE
+  PAUSED
+  SOLD_OUT
+  EXPIRED
+  CLOSED
+}
+
+enum RequestStatus {
+  PENDING
+  RESERVED
+  ACCEPTED
+  DECLINED
+  CANCELLED
+  EXPIRED
+}
+
+enum OrderStatus {
+  PENDING
+  RESERVED
+  ACCEPTED
+  PREPARING
+  READY_FOR_PICKUP
+  IN_TRANSIT
+  DELIVERED
+  COMPLETED
+  DECLINED
+  CANCELLED
+  EXPIRED
+}
+
+enum TransferStatus {
+  REQUESTED
+  APPROVED
+  PREPARING
+  IN_TRANSIT
+  RECEIVED
+  CANCELLED
+}
+
+enum ReservationStatus {
+  ACTIVE
+  CONFIRMED
+  RELEASED
+  EXPIRED
+}
+
+model User {
+  id String @id @default(uuid()) @db.Uuid
+  fullName String
+  email String @unique
+  passwordHash String
+  memberships OrganizationMember[]
+  refreshTokens RefreshToken[]
+  passwordResetTokens PasswordResetToken[]
+  notifications Notification[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model PasswordResetToken {
+  id String @id @default(uuid()) @db.Uuid
+  userId String @db.Uuid
+  tokenHash String @unique
+  expiresAt DateTime
+  usedAt DateTime?
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+  @@index([userId, expiresAt])
+}
+
+model Organization {
+  id String @id @default(uuid()) @db.Uuid
+  name String
+  slug String @unique
+  type String
+  country String
+  logo String?
+  status OrganizationStatus @default(ACTIVE)
+  marketplaceVisible Boolean @default(true)
+  members OrganizationMember[]
+  locations Location[]
+  products Product[]
+  sellerListings MarketplaceListing[]
+  buyerRequests StockRequest[] @relation("BuyerRequests")
+  sellerRequests StockRequest[] @relation("SellerRequests")
+  ordersAsBuyer Order[] @relation("BuyerOrders")
+  ordersAsSeller Order[] @relation("SellerOrders")
+  notifications Notification[]
+  auditLogs AuditLog[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model OrganizationMember {
+  id String @id @default(uuid()) @db.Uuid
+  userId String @db.Uuid
+  organizationId String @db.Uuid
+  role Role @default(EMPLOYEE)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+  @@unique([userId, organizationId])
+  @@index([organizationId, role])
+}
+
+model RefreshToken {
+  id String @id @default(uuid()) @db.Uuid
+  userId String @db.Uuid
+  tokenHash String @unique
+  familyId String @db.Uuid
+  expiresAt DateTime
+  revokedAt DateTime?
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+  @@index([userId, familyId])
+}
+
+model Location {
+  id String @id @default(uuid()) @db.Uuid
+  organizationId String @db.Uuid
+  name String
+  type LocationType
+  country String
+  city String
+  address String
+  isActive Boolean @default(true)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  inventory Inventory[]
+  listings MarketplaceListing[]
+  sourceTransfers InternalTransfer[] @relation("SourceLocation")
+  destinationTransfers InternalTransfer[] @relation("DestinationLocation")
+  incomingRequests StockRequest[] @relation("BuyerDestination")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@unique([organizationId, name])
+  @@index([organizationId, isActive])
+}
+
+model Product {
+  id String @id @default(uuid()) @db.Uuid
+  organizationId String @db.Uuid
+  sku String
+  name String
+  description String?
+  category String
+  brand String?
+  unit String
+  barcode String?
+  costPrice Decimal @db.Decimal(14, 2)
+  defaultSalePrice Decimal @db.Decimal(14, 2)
+  minimumStock Int @default(0)
+  reorderPoint Int @default(0)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  inventory Inventory[]
+  movements InventoryMovement[]
+  listings MarketplaceListing[]
+  transferItems TransferItem[]
+  buyerRequests StockRequest[] @relation("BuyerRequestProduct")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@unique([organizationId, sku])
+  @@index([organizationId, name])
+  @@index([organizationId, category])
+}
+
+model Inventory {
+  id String @id @default(uuid()) @db.Uuid
+  organizationId String @db.Uuid
+  productId String @db.Uuid
+  locationId String @db.Uuid
+  quantityOnHand Int @default(0)
+  quantityReserved Int @default(0)
+  averageDailySales Decimal @default(0) @db.Decimal(12, 3)
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  location Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@unique([productId, locationId])
+  @@index([organizationId, locationId])
+}
+
+model InventoryMovement {
+  id String @id @default(uuid()) @db.Uuid
+  organizationId String @db.Uuid
+  productId String @db.Uuid
+  locationId String @db.Uuid
+  type MovementType
+  quantity Int
+  balanceAfter Int
+  referenceType String?
+  referenceId String? @db.Uuid
+  actorId String? @db.Uuid
+  product Product @relation(fields: [productId], references: [id])
+  createdAt DateTime @default(now())
+  @@index([organizationId, productId, createdAt(sort: Desc)])
+}
+
+model MarketplaceListing {
+  id String @id @default(uuid()) @db.Uuid
+  sellerOrganizationId String @db.Uuid
+  productId String @db.Uuid
+  locationId String @db.Uuid
+  sellerSku String
+  title String
+  description String?
+  quantityAvailable Int
+  quantityReserved Int @default(0)
+  minimumOrderQuantity Int @default(1)
+  unitPrice Decimal @db.Decimal(14, 2)
+  currency String @default("EGP")
+  status ListingStatus @default(DRAFT)
+  expiresAt DateTime?
+  sellerOrganization Organization @relation(fields: [sellerOrganizationId], references: [id])
+  product Product @relation(fields: [productId], references: [id])
+  location Location @relation(fields: [locationId], references: [id])
+  requests StockRequest[]
+  reservations Reservation[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@index([status, createdAt(sort: Desc)])
+  @@index([sellerOrganizationId, status])
+  @@index([productId, status])
+}
+
+model StockRequest {
+  id String @id @default(uuid()) @db.Uuid
+  listingId String @db.Uuid
+  buyerOrganizationId String @db.Uuid
+  sellerOrganizationId String @db.Uuid
+  buyerProductId String @db.Uuid
+  destinationLocationId String @db.Uuid
+  quantity Int
+  unitPrice Decimal @db.Decimal(14, 2)
+  status RequestStatus @default(PENDING)
+  expiresAt DateTime
+  listing MarketplaceListing @relation(fields: [listingId], references: [id])
+  buyerOrganization Organization @relation("BuyerRequests", fields: [buyerOrganizationId], references: [id])
+  sellerOrganization Organization @relation("SellerRequests", fields: [sellerOrganizationId], references: [id])
+  buyerProduct Product @relation("BuyerRequestProduct", fields: [buyerProductId], references: [id])
+  destinationLocation Location @relation("BuyerDestination", fields: [destinationLocationId], references: [id])
+  reservation Reservation?
+  order Order?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@index([buyerOrganizationId, status, createdAt(sort: Desc)])
+  @@index([sellerOrganizationId, status, createdAt(sort: Desc)])
+}
+
+model Reservation {
+  id String @id @default(uuid()) @db.Uuid
+  listingId String @db.Uuid
+  requestId String @unique @db.Uuid
+  quantity Int
+  status ReservationStatus @default(ACTIVE)
+  expiresAt DateTime
+  listing MarketplaceListing @relation(fields: [listingId], references: [id])
+  request StockRequest @relation(fields: [requestId], references: [id])
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@index([status, expiresAt])
+}
+
+model Order {
+  id String @id @default(uuid()) @db.Uuid
+  requestId String @unique @db.Uuid
+  buyerOrganizationId String @db.Uuid
+  sellerOrganizationId String @db.Uuid
+  status OrderStatus @default(ACCEPTED)
+  totalAmount Decimal @db.Decimal(16, 2)
+  currency String
+  request StockRequest @relation(fields: [requestId], references: [id])
+  buyerOrganization Organization @relation("BuyerOrders", fields: [buyerOrganizationId], references: [id])
+  sellerOrganization Organization @relation("SellerOrders", fields: [sellerOrganizationId], references: [id])
+  statusHistory OrderStatusHistory[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@index([buyerOrganizationId, status, createdAt(sort: Desc)])
+  @@index([sellerOrganizationId, status, createdAt(sort: Desc)])
+}
+
+model OrderStatusHistory {
+  id String @id @default(uuid()) @db.Uuid
+  orderId String @db.Uuid
+  fromStatus OrderStatus?
+  toStatus OrderStatus
+  actorId String @db.Uuid
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+  @@index([orderId, createdAt])
+}
+
+model InternalTransfer {
+  id String @id @default(uuid()) @db.Uuid
+  organizationId String @db.Uuid
+  sourceLocationId String @db.Uuid
+  destinationLocationId String @db.Uuid
+  status TransferStatus @default(REQUESTED)
+  createdById String @db.Uuid
+  sourceLocation Location @relation("SourceLocation", fields: [sourceLocationId], references: [id])
+  destinationLocation Location @relation("DestinationLocation", fields: [destinationLocationId], references: [id])
+  items TransferItem[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@index([organizationId, status, createdAt(sort: Desc)])
+}
+
+model TransferItem {
+  id String @id @default(uuid()) @db.Uuid
+  transferId String @db.Uuid
+  productId String @db.Uuid
+  quantity Int
+  transfer InternalTransfer @relation(fields: [transferId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id])
+  @@unique([transferId, productId])
+}
+
+model Notification {
+  id String @id @default(uuid()) @db.Uuid
+  userId String @db.Uuid
+  organizationId String @db.Uuid
+  type String
+  title String
+  message String
+  readAt DateTime?
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+  @@index([userId, readAt, createdAt(sort: Desc)])
+}
+
+model AuditLog {
+  id String @id @default(uuid()) @db.Uuid
+  organizationId String @db.Uuid
+  actorId String? @db.Uuid
+  action String
+  entity String
+  entityId String? @db.Uuid
+  metadata Json?
+  organization Organization @relation(fields: [organizationId], references: [id])
+  createdAt DateTime @default(now())
+  @@index([organizationId, createdAt(sort: Desc)])
+  @@index([entity, entityId])
+}
+
+model IdempotencyKey {
+  id String @id @default(uuid()) @db.Uuid
+  organizationId String @db.Uuid
+  key String
+  operation String
+  response Json
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  @@unique([organizationId, key, operation])
+  @@index([expiresAt])
+}

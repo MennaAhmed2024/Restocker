@@ -1,0 +1,63 @@
+x-api: &api
+  build: { context: ., dockerfile: apps/api/Dockerfile }
+  restart: unless-stopped
+  environment: &api-env
+    NODE_ENV: development
+    PORT: 3000
+    DATABASE_URL: postgresql://${POSTGRES_USER:-restockr}:${POSTGRES_PASSWORD:-restockr_dev}@postgres:5432/${POSTGRES_DB:-restockr}?schema=public
+    REDIS_URL: redis://redis:6379
+    ACCESS_TOKEN_SECRET: ${ACCESS_TOKEN_SECRET:-development-access-secret-change-before-production}
+    REFRESH_TOKEN_SECRET: ${REFRESH_TOKEN_SECRET:-development-refresh-secret-change-before-production}
+    ACCESS_TOKEN_EXPIRES_IN: 15m
+    REFRESH_TOKEN_EXPIRES_IN: 7d
+    CORS_ORIGIN: http://localhost:${WEB_PORT:-8080}
+    EXPOSE_INSTANCE_ID: "true"
+    APP_URL: http://localhost:${WEB_PORT:-8080}
+    SMTP_HOST: mailpit
+    SMTP_PORT: 1025
+    SMTP_FROM: ReStockr <no-reply@restockr.local>
+  depends_on:
+    postgres: { condition: service_healthy }
+    redis: { condition: service_healthy }
+    mailpit: { condition: service_started }
+  healthcheck: { test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/health/ready"], interval: 10s, timeout: 3s, retries: 5 }
+
+services:
+  nginx:
+    image: nginx:1.29-alpine
+    ports: ["${WEB_PORT:-8080}:80"]
+    volumes: ["./infrastructure/nginx/nginx.conf:/etc/nginx/nginx.conf:ro"]
+    depends_on:
+      web: { condition: service_healthy }
+      api-1: { condition: service_healthy }
+      api-2: { condition: service_healthy }
+      api-3: { condition: service_healthy }
+  web:
+    build: { context: ., dockerfile: apps/web/Dockerfile }
+  api-1: *api
+  api-2: *api
+  api-3: *api
+  worker:
+    <<: *api
+    command: ["node", "apps/api/dist/worker.js"]
+    healthcheck: { disable: true }
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-restockr}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-restockr_dev}
+      POSTGRES_DB: ${POSTGRES_DB:-restockr}
+    volumes: ["postgres_data:/var/lib/postgresql/data"]
+    healthcheck: { test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"], interval: 5s, timeout: 3s, retries: 10 }
+  redis:
+    image: redis:8-alpine
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory-policy", "noeviction"]
+    volumes: ["redis_data:/data"]
+    healthcheck: { test: ["CMD", "redis-cli", "ping"], interval: 5s, timeout: 3s, retries: 10 }
+  mailpit:
+    image: axllent/mailpit:v1.27
+    ports: ["127.0.0.1:8026:8025"]
+
+volumes:
+  postgres_data:
+  redis_data:

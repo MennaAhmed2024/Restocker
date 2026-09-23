@@ -1,0 +1,17 @@
+{
+  "name": "restockr",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": ["apps/*", "packages/*"],
+  "scripts": {
+    "dev": "npm run dev --workspace @restockr/api & npm run dev --workspace @restockr/web",
+    "build": "npm run build --workspace @restockr/shared && npm run build --workspace @restockr/api && npm run build --workspace @restockr/web",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run test --workspace @restockr/api",
+    "lint": "npm run lint --workspaces --if-present",
+    "db:generate": "npm run db:generate --workspace @restockr/api",
+    "db:migrate": "npm run db:migrate --workspace @restockr/api",
+    "db:seed": "npm run db:seed --workspace @restockr/api"
+  },
+  "engines": { "node": ">=22" }
+}
